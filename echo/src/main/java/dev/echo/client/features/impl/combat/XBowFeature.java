@@ -385,11 +385,19 @@ public class XBowFeature extends Feature {
     private static int findStepSlot(int step) {
         return switch (step) {
             case FIRE -> findIgnitionSlot();
-            case RAIL -> InventoryItems.findStackInHotbar(InventoryItems::isRail);
-            case CART -> InventoryItems.findStackInHotbar(XBowFeature::isTntCart);
+            case RAIL -> hotbarOrOffhand(InventoryItems::isRail);
+            case CART -> hotbarOrOffhand(XBowFeature::isTntCart);
             case BLOCK -> findProtectionSlot();
             default -> InventoryItems.findStackInHotbar(InventoryItems::isChargedCrossbow);
         };
+    }
+
+    /** An offhand item is reached by the vanilla click only while the selected slot is empty, so select one. */
+    private static int hotbarOrOffhand(java.util.function.Predicate<ItemStack> matches) {
+        int slot = InventoryItems.findStackInHotbar(matches);
+        if (slot != -1 || !matches.test(client.player.getOffHandStack())) return slot;
+        java.util.List<Integer> empty = InventoryItems.emptyHotbarSlots();
+        return empty.isEmpty() ? -1 : empty.get(0);
     }
 
     private static boolean isIgnitionItem(ItemStack stack) { return stack.isOf(Items.FLINT_AND_STEEL); }
