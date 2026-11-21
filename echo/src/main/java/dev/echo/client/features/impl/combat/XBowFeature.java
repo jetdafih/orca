@@ -6,6 +6,7 @@ import dev.echo.client.events.Subscribe;
 import dev.echo.client.events.input.HotbarKeyEvent;
 import dev.echo.client.events.input.MouseMovementEvent;
 import dev.echo.client.events.input.UseKeyEvent;
+import dev.echo.client.events.lifecycle.ClientTickEvent;
 import dev.echo.client.features.Category;
 import dev.echo.client.features.Feature;
 import dev.echo.client.features.FeatureInfo;
@@ -32,7 +33,11 @@ import net.minecraft.block.AbstractFireBlock;
 import net.minecraft.block.AbstractRailBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.BlockWithEntity;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.FallingBlock;
 import net.minecraft.entity.vehicle.TntMinecartEntity;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
@@ -59,16 +64,23 @@ public class XBowFeature extends Feature {
     private static final int RAIL = 1;
     private static final int CART = 2;
     private static final int SHOOT = 3;
+    private static final int BLOCK = 4;
+    /** How far below the eye the protection block's line-of-sight check starts. */
+    private static final double PROTECTION_EYE_DROP = 0.1;
     private static final CharSequence placeOption2 = CatalogText.literal("Fire");
     private static final CharSequence placeOption4 = CatalogText.literal("Rail");
     private static final CharSequence placeOption3 = CatalogText.literal("Cart");
     private static final CharSequence placeOption = CatalogText.literal("Shoot");
+    private static final CharSequence placeOption5 = CatalogText.literal("Block");
     private static KeybindSetting activateKey;
+    private static KeybindSetting blockKey;
     private static MultiChoiceSetting place;
     private static BooleanSetting autoAim;
     private static BooleanSetting silentRotations;
     private BlockPos targetBlockPosition;
     private BlockPos supportBlockPosition;
+    /** Cell beside the player that gets (or already has) a protective block; null means no protection this run. */
+    private BlockPos protectionBlockPosition;
     private Vec3d cachedTargetPosition;
     private Vec3d targetHitPosition;
     private long activationTick;
@@ -77,6 +89,7 @@ public class XBowFeature extends Feature {
     private int selectedPlacementSlot;
     private boolean interactionSubmitted;
     private boolean activationKeyHeld;
+    private boolean blockKeyHeld;
     private boolean waitingForRotationRelease;
 
     public XBowFeature() {
@@ -88,6 +101,7 @@ public class XBowFeature extends Feature {
     public static void appendBootstrapSettings(XBowFeature feature) {
         CatalogSettings.append(feature, activateKey);
         CatalogSettings.append(feature, place);
+        CatalogSettings.append(feature, blockKey);
         CatalogSettings.append(feature, autoAim);
         CatalogSettings.append(feature, silentRotations);
     }
@@ -96,12 +110,14 @@ public class XBowFeature extends Feature {
     public static CharSequence bootstrapPlaceOption4() { return placeOption4; }
     public static CharSequence bootstrapPlaceOption3() { return placeOption3; }
     public static CharSequence bootstrapPlaceOption() { return placeOption; }
+    public static CharSequence bootstrapPlaceOption5() { return placeOption5; }
 
     public static void assignBootstrapSettings(XBowFeature feature, MultiChoiceSetting preparedPlace,
-            KeybindSetting preparedActivateKey, BooleanSetting preparedAutoAim,
+            KeybindSetting preparedActivateKey, KeybindSetting preparedBlockKey, BooleanSetting preparedAutoAim,
             BooleanSetting preparedSilentRotations) {
         place = preparedPlace;
         activateKey = preparedActivateKey;
+        blockKey = preparedBlockKey;
         autoAim = preparedAutoAim;
         silentRotations = preparedSilentRotations;
     }
@@ -112,6 +128,7 @@ public class XBowFeature extends Feature {
         place.setSelected(placeOption4, true);
         place.setSelected(placeOption3, true);
         place.setSelected(placeOption, true);
+        place.setSelected(placeOption5, true);
         silentRotations.setVisibilityPredicate(ignored -> autoAim.getValue());
     }
 
@@ -135,7 +152,9 @@ public class XBowFeature extends Feature {
         pendingBlockHit = null;
         selectedPlacementSlot = -1;
         interactionSubmitted = false;
+        protectionBlockPosition = null;
         activationKeyHeld = false;
+        blockKeyHeld = blockKey.getKey().isPressed();
         waitingForRotationRelease = false;
         super.onEnable();
     }
@@ -169,6 +188,16 @@ public class XBowFeature extends Feature {
         }
         rotations().cancel(this);
         super.onDisable();
+    }
+
+    /** Flips the "Block" place option each time the toggle key is pressed (in world, no screen open). */
+    @Subscribe
+    private void onClientTick(ClientTickEvent event) {
+        boolean pressed = blockKey.getKey().isPressed();
+        boolean risingEdge = pressed && !blockKeyHeld;
+        blockKeyHeld = pressed;
+        if (!risingEdge || isOutsideWorld() || MinecraftRenderState.getScreen() != null) return;
+        place.setSelected(placeOption5, !place.isSelected(placeOption5));
     }
 
     @Subscribe
@@ -271,6 +300,9 @@ public class XBowFeature extends Feature {
         if (place.isSelected(placeOption) && !hasCrossbow(findStepSlot(SHOOT))) return;
         supportBlockPosition = null;
         targetHitPosition = Vec3d.add(target, 0.5, 0.35, 0.5);
+        // Protection is best-effort: when no block is usable this stays null and XBow runs as before.
+        protectionBlockPosition = place.isSelected(placeOption5)
+                ? findProtectionPosition(target, eye, reachSquared) : null;
         if (place.isSelected(placeOption2)) {
             if (findStepSlot(FIRE) == -1) return;
             if (!findAdjacentFirePosition(target, eye, reachSquared)
@@ -289,6 +321,7 @@ public class XBowFeature extends Feature {
             double alignment = direction.getOffsetX() * offset.x + direction.getOffsetZ() * offset.z;
             if (alignment <= bestAlignment) continue;
             BlockPos candidate = target.offset(direction);
+            if (candidate.equals(protectionBlockPosition)) continue;
             if (!canPlaceIgnition(candidate)) continue;
             if (client.player.getBoundingBox().intersects(new Box(candidate))) continue;
             PlacementTarget placement = BlockPlacement.find(candidate, true);
@@ -318,7 +351,8 @@ public class XBowFeature extends Feature {
 
     private boolean tryFirePosition(BlockPos candidate, BlockPos target, Vec3d eye,
             double reachSquared, Set<BlockPos> visited) {
-        if (candidate.equals(target) || !visited.add(candidate)) return false;
+        if (candidate.equals(target) || candidate.equals(protectionBlockPosition)
+                || !visited.add(candidate)) return false;
         Box bounds = new Box(candidate).expand(FIRE_MARGIN);
         if (!bounds.contains(eye) && bounds.raycast(eye, targetHitPosition).isEmpty()) return false;
         if (!canPlaceIgnition(candidate)) return false;
@@ -353,6 +387,7 @@ public class XBowFeature extends Feature {
             case FIRE -> findIgnitionSlot();
             case RAIL -> InventoryItems.findStackInHotbar(InventoryItems::isRail);
             case CART -> InventoryItems.findStackInHotbar(XBowFeature::isTntCart);
+            case BLOCK -> findProtectionSlot();
             default -> InventoryItems.findStackInHotbar(InventoryItems::isChargedCrossbow);
         };
     }
@@ -382,6 +417,50 @@ public class XBowFeature extends Feature {
     }
     private static boolean isTntCart(ItemStack stack) { return stack.isOf(Items.TNT_MINECART); }
 
+    /** Hotbar slot of the full block with the highest blast resistance, or -1 when none is usable. */
+    private static int findProtectionSlot() {
+        int bestSlot = -1;
+        float bestResistance = -1.0F;
+        for (int slot = 0; slot <= 8; slot++) {
+            ItemStack stack = client.player.getInventory().getStack(slot);
+            if (!isProtectionBlock(stack)) continue;
+            float resistance = ((BlockItem) stack.getItem()).getBlock().getBlastResistance();
+            if (resistance > bestResistance) {
+                bestSlot = slot;
+                bestResistance = resistance;
+            }
+        }
+        return bestSlot;
+    }
+
+    /** Full cubes only: no slabs, gravity blocks, TNT or blocks with an inventory/entity (dispensers, furnaces). */
+    private static boolean isProtectionBlock(ItemStack stack) {
+        if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem blockItem)) return false;
+        Block block = blockItem.getBlock();
+        if (block instanceof FallingBlock || block instanceof BlockWithEntity || block == Blocks.TNT) return false;
+        return BlockPlacement.isDefaultStateFullCube(block);
+    }
+
+    /**
+     * Foot-level cell beside the player on the side facing the target. Returns the cell when it is already
+     * filled, or when a block can be placed there without covering the shot; null when protection is not possible.
+     */
+    private BlockPos findProtectionPosition(BlockPos target, Vec3d eye, double reachSquared) {
+        Vec3d towardTarget = Vec3d.ofCenter(target).subtract(client.player.getEntityPos());
+        BlockPos position = client.player.getBlockPos()
+                .offset(Direction.getFacing(towardTarget.x, 0.0, towardTarget.z));
+        if (position.equals(target)) return null;
+        if (!BlockPlacement.isReplaceable(position)) return position;
+        if (BlockPlacement.intersectsPlayer(position) || BlockPlacement.hasBlockingEntity(position)) return null;
+        if (findProtectionSlot() == -1) return null;
+        if (new Box(position).raycast(eye.subtract(0.0, PROTECTION_EYE_DROP, 0.0), targetHitPosition).isPresent()) {
+            return null;
+        }
+        PlacementTarget placement = BlockPlacement.find(position, true);
+        return placement != null && eye.squaredDistanceTo(placement.hitResult().getPos()) <= reachSquared
+                ? position : null;
+    }
+
     private static boolean hasCrossbow(int slot) {
         return slot != -1 || InventoryItems.isChargedCrossbow(client.player.getOffHandStack());
     }
@@ -391,6 +470,8 @@ public class XBowFeature extends Feature {
         if (place.isSelected(placeOption4) && !railPresent) return RAIL;
         boolean cartPresent = findCart(targetBlockPosition) != null;
         if (place.isSelected(placeOption3) && railPresent && !cartPresent) return CART;
+        if (place.isSelected(placeOption5) && protectionBlockPosition != null
+                && BlockPlacement.isReplaceable(protectionBlockPosition)) return BLOCK;
         if (place.isSelected(placeOption2) && !ignitionPresent(supportBlockPosition)) return FIRE;
         return place.isSelected(placeOption) && cartPresent ? SHOOT : -1;
     }
@@ -401,6 +482,14 @@ public class XBowFeature extends Feature {
         if (placementStep == FIRE) {
             if (!canPlaceIgnition(supportBlockPosition)) return null;
             PlacementTarget placement = BlockPlacement.find(supportBlockPosition, true);
+            return placement != null && eye.squaredDistanceTo(placement.hitResult().getPos()) <= reachSquared
+                    ? placement.hitResult() : null;
+        }
+        if (placementStep == BLOCK) {
+            if (protectionBlockPosition == null || !BlockPlacement.isReplaceable(protectionBlockPosition)
+                    || BlockPlacement.intersectsPlayer(protectionBlockPosition)
+                    || BlockPlacement.hasBlockingEntity(protectionBlockPosition)) return null;
+            PlacementTarget placement = BlockPlacement.find(protectionBlockPosition, true);
             return placement != null && eye.squaredDistanceTo(placement.hitResult().getPos()) <= reachSquared
                     ? placement.hitResult() : null;
         }
@@ -470,6 +559,7 @@ public class XBowFeature extends Feature {
             throw new IllegalStateException("Resolved class initialization failed", failure);
         }
         targetHitPosition = null;
+        protectionBlockPosition = null;
         pendingBlockHit = null;
         selectedPlacementSlot = -1;
         interactionSubmitted = false;
