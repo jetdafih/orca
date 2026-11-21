@@ -14,6 +14,7 @@ import java.nio.IntBuffer;
 import org.lwjgl.stb.STBImage;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
+import java.nio.Buffer;
 
 /**
  * Image loading, RGBA decoding, and upload through the renderer's transfer API.
@@ -54,7 +55,7 @@ public final class ImageDecoder {
                 }
             }
         } finally {
-            MemoryUtil.memFree(encoded);
+            MemoryUtil.memFree((Buffer) encoded);
         }
     }
 

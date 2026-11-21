@@ -10,6 +10,7 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.nio.ByteBuffer;
 import org.lwjgl.system.MemoryUtil;
+import java.nio.Buffer;
 
 /**
  * Reconstructed SVG pixel pipeline, pending the control-flow proofs in needs.json.
@@ -41,7 +42,7 @@ public final class SvgRasterizer {
             downsample(renderSupersampled(document, width, height), width, height, colorMode, pixels);
             return pixels.flip();
         } catch (RuntimeException | Error failure) {
-            MemoryUtil.memFree(pixels);
+            MemoryUtil.memFree((Buffer) pixels);
             throw failure;
         }
     }

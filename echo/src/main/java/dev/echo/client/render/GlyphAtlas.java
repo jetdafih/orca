@@ -20,6 +20,7 @@ import org.lwjgl.stb.STBTTFontinfo;
 import org.lwjgl.stb.STBTruetype;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
+import java.nio.Buffer;
 
 /** Font metrics, quadratic contours and the three shader-readable curve/band textures. */
 public class GlyphAtlas {
@@ -80,7 +81,7 @@ public class GlyphAtlas {
             }
         }
         // Original font-data release occurs after successful metric/outline/kerning construction.
-        MemoryUtil.memFree(fontBytes);
+        MemoryUtil.memFree((Buffer) fontBytes);
         return grid;
     }
 

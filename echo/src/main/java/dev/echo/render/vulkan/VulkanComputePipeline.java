@@ -11,6 +11,7 @@ import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
+import java.nio.Buffer;
 
 /** Vulkan compute pipeline; owns its shader, descriptor-set layout and pipeline layout. */
 class VulkanComputePipeline extends ComputePipeline {
@@ -35,7 +36,7 @@ class VulkanComputePipeline extends ComputePipeline {
             pipeline = createPipeline(stack);
         }
         // Original frees after success, not in a finally block.
-        MemoryUtil.memFree(spirv);
+        MemoryUtil.memFree((Buffer) spirv);
     }
 
     public int bindingKind(int binding) {

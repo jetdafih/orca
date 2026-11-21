@@ -12,6 +12,7 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.lwjgl.system.MemoryUtil;
+import java.nio.Buffer;
 
 /**
  * Document-loading half of the SVG texture cache. The sized RGBA allocation is
@@ -29,7 +30,7 @@ public final class SvgDocumentRasterizer {
                     key.width(), key.height(), key.colorMode(), pixels);
             return pixels.flip();
         } catch (RuntimeException | Error failure) {
-            MemoryUtil.memFree(pixels);
+            MemoryUtil.memFree((Buffer) pixels);
             throw failure;
         }
     }
