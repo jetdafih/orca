@@ -13,7 +13,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
-import java.nio.Buffer;
 
 /**
  * Render-thread texture cache with a single daemon rasterization worker.
@@ -53,7 +52,7 @@ public final class SvgTextureCache implements AutoCloseable {
             textures.put(key, texture);
             return texture;
         } finally {
-            MemoryUtil.memFree((Buffer) pixels);
+            MemoryUtil.memFree((java.nio.Buffer) pixels);
         }
     }
 

@@ -25,7 +25,6 @@ import org.lwjgl.vulkan.VkPipelineVertexInputStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineViewportStateCreateInfo;
 import org.lwjgl.vulkan.VkVertexInputAttributeDescription;
 import org.lwjgl.vulkan.VkVertexInputBindingDescription;
-import java.nio.Buffer;
 
 /** Dynamic-rendering pipeline, with a lazily allocated reversed-winding variant. */
 public class VulkanGraphicsPipeline extends GraphicsPipeline {
@@ -53,7 +52,7 @@ public class VulkanGraphicsPipeline extends GraphicsPipeline {
                     descriptorSetLayout, pushConstantBytes, 17);
             pipeline = createPipeline(stack, false);
         }
-        MemoryUtil.memFree((Buffer) spirv);
+        MemoryUtil.memFree((java.nio.Buffer) spirv);
     }
 
     public int bindingKind(int binding) {

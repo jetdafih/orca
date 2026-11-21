@@ -17,7 +17,6 @@ import org.lwjgl.stb.STBVorbis;
 import org.lwjgl.stb.STBVorbisInfo;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
-import java.nio.Buffer;
 
 /** Decoded sound ownership, OpenAL buffer lifecycle and queued UI playback. */
 public final class EchoAudio implements MinecraftAccess {
@@ -50,7 +49,7 @@ public final class EchoAudio implements MinecraftAccess {
                 long decoder = STBVorbis.stb_vorbis_open_memory(data, error, null);
                 if (decoder == 0L) {
                     Echo.LOGGER.error("[EchoAudio] STBVorbis error " + error.get(0) + " for " + name);
-                    MemoryUtil.memFree((Buffer) data);
+                    MemoryUtil.memFree((java.nio.Buffer) data);
                     continue;
                 }
                 STBVorbisInfo info = STBVorbisInfo.malloc(stack);
@@ -63,7 +62,7 @@ public final class EchoAudio implements MinecraftAccess {
                 STBVorbis.stb_vorbis_close(decoder);
                 decodedAudio.put(name, new PcmAudio(samples, channels, sampleRate));
             }
-            MemoryUtil.memFree((Buffer) data);
+            MemoryUtil.memFree((java.nio.Buffer) data);
         }
     }
 
@@ -162,7 +161,7 @@ public final class EchoAudio implements MinecraftAccess {
         }
         audioBuffers.clear();
         for (PcmAudio audio : decodedAudio.values()) {
-            MemoryUtil.memFree((Buffer) audio.samples());
+            MemoryUtil.memFree((java.nio.Buffer) audio.samples());
         }
         decodedAudio.clear();
         buffersInitialized = false;

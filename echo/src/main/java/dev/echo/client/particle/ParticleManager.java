@@ -26,7 +26,6 @@ import java.util.Map;
 import org.lwjgl.stb.STBImage;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
-import java.nio.Buffer;
 
 /** Active particle storage, render-event updates and the shared RGBA sprite atlas. */
 public class ParticleManager {
@@ -134,7 +133,7 @@ public class ParticleManager {
                 IntBuffer components = stack.mallocInt(1);
                 STBImage.stbi_set_flip_vertically_on_load(false);
                 ByteBuffer pixels = STBImage.stbi_load_from_memory(encoded, width, height, components, 4);
-                MemoryUtil.memFree((Buffer) encoded);
+                MemoryUtil.memFree((java.nio.Buffer) encoded);
                 if (pixels == null) {
                     continue;
                 }
@@ -166,7 +165,7 @@ public class ParticleManager {
             STBImage.stbi_image_free(image.pixels());
         }
         texture = uploadAtlas(Echo.renderDevice, atlasPixels, atlasWidth, atlasHeight);
-        MemoryUtil.memFree((Buffer) atlasPixels);
+        MemoryUtil.memFree((java.nio.Buffer) atlasPixels);
     }
 
     /** Inlined original RGBA upload operation; source and staging ownership stay explicit. */
