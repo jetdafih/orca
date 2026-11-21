@@ -71,7 +71,7 @@ public final class SvgTextureCache implements AutoCloseable {
             device.release(texture.texture);
         }
         textures.clear();
-        pending.values().forEach(task -> task.thenAccept(MemoryUtil::memFree));
+        pending.values().forEach(task -> task.thenAccept(pixels -> MemoryUtil.memFree((java.nio.Buffer) pixels)));
         pending.clear();
     }
 
