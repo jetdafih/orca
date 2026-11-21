@@ -1,5 +1,6 @@
 .gradle/
 build/
 **/build/
+!tools/build/
 analysis/
 __pycache__/

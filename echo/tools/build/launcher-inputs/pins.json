@@ -1,0 +1,11 @@
+{
+  "files": {
+    "minecraft.json": "471a6eeadf1c74f84ed5d4290fb7234b746373478a4d6ac651962b93f0cb36d9",
+    "fabric.json": "5199658a00dd67aa238c0500c8c75e21f1f56c6dbf3bb22cb4c2ce54a0a91a3d"
+  },
+  "urls": {
+    "minecraft.json": "https://piston-meta.mojang.com/v1/packages/718cd84b4912691fe5de829aab6876a4b7f6c5c4/1.21.11.json",
+    "fabric.json": "https://meta.fabricmc.net/v2/versions/loader/1.21.11/0.19.3/profile/json"
+  },
+  "mojang_sha1": "718cd84b4912691fe5de829aab6876a4b7f6c5c4"
+}
