@@ -22,6 +22,8 @@ public class FastUseFeature extends Feature {
     public static final CharSequence FIREWORKS_GROUP = CatalogText.literal("Fireworks");
     public static FloatRangeSetting delay;
     public static ItemListSetting items = new FastUseItemListSetting(CatalogText.literal("Items"));
+    public static FloatRangeSetting exceptionDelay;
+    public static ItemListSetting exceptions = new FastUseItemListSetting(CatalogText.literal("Exceptions"));
 
     public FastUseFeature() {
         super(new FeatureInfo(dev.echo.client.bootstrap.CatalogText.literal("Fast Use"), dev.echo.client.bootstrap.CatalogText.literal("Faster item use"), dev.echo.client.features.Category.UTILITY));
@@ -38,6 +40,12 @@ public class FastUseFeature extends Feature {
             return;
         }
         if (client.interactionManager == null || client.interactionManager.isBreakingBlock()) {
+            return;
+        }
+        Item held = client.player.getMainHandStack().getItem();
+        Item heldOff = client.player.getOffHandStack().getItem();
+        if (exceptions.isEntrySelected(held) || exceptions.isEntrySelected(heldOff)) {
+            ((MinecraftClientAccessor) client).setItemUseCooldown((int) exceptionDelay.sampleUniform());
             return;
         }
         if (items.getSelectedCount() > 0) {
