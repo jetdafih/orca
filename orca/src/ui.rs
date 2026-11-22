@@ -63,8 +63,12 @@ impl Pen<'_> {
         if self.dry || t.is_empty() {
             return;
         }
-        let em = f.0 as f32 * k() * 1.12;
-        gfx::text(self.d, t, [self.o[0] + x * k(), self.o[1] + cy * k() - em * 0.5], color, f);
+        gfx::text(self.d, t, [self.o[0] + x * k(), gfx::text_y(self.o[1] + cy * k(), f)], color, f);
+    }
+
+    /// Where the middle of a line drawn at `cy` really lands, in CSS pixels, after the game snaps it to a GUI pixel.
+    fn mid(&self, cy: f32, f: Face) -> f32 {
+        (gfx::text_mid(gfx::text_y(self.o[1] + cy * k(), f), f) - self.o[1]) / k()
     }
 
     fn text_right(&mut self, t: &str, right: f32, cy: f32, color: u32, f: Face) {
@@ -517,7 +521,8 @@ pub fn draw_window(s: &mut State, draw: &mut dyn DrawContext, host: &dyn ClientH
             p.round(r, 7.0, gfx::alpha(TAB_ON, t));
         }
         let col = gfx::mix(MUTED, TEXT, t.max(hv * 0.7));
-        icon(&mut p, i, tx + 12.0, 26.0 - 7.0, col);
+        let mid = p.mid(26.0, REG(12));
+        icon(&mut p, i, tx + 12.0, mid - 7.0, col);
         p.text(n, tx + 12.0 + 14.0 + 7.0, 26.0, col, REG(12));
         p.hit(Hit::Tab(i), r);
         tx += tw + 2.0;

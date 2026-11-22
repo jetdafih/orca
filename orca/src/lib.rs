@@ -3,7 +3,7 @@
 use mod_api::{
     self, ClientHost, ClientTickPreEvent, DrawContext, Flow, GuiRenderPostEvent, Hooks,
     InputKeyEvent, KeyAction, ScreenKeyPressedPreEvent, ScreenMouseButtonPressedPreEvent,
-    ScreenMouseButtonReleasedPreEvent, ScreenCharTypedPreEvent, ScreenMouseDraggedPreEvent, ScreenMouseScrolledPreEvent, ScreenRenderPostEvent, ScreenRenderPreEvent,
+    ScreenMouseButtonReleasedPreEvent, ScreenCharTypedPreEvent, ScreenMouseDraggedPreEvent, ScreenMouseScrolledPreEvent, ScreenRenderPostEvent, ScreenRenderPreEvent, WindowResizeEvent,
 };
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -367,7 +367,7 @@ impl Hooks for Orca {
 
     /// The overlays sit under the window: drawn before it while it is open.
     fn screen_render_pre(&self, host: &dyn ClientHost, event: &mut ScreenRenderPreEvent<'_>) -> Flow {
-        if host.mod_screen() == Some(ID) {
+        if host.mod_screen() == Some(ID) && host.local_player().is_some() {
             let size = event.draw.size();
             self.with(|s| hud::draw(s, &mut *event.draw, host, size));
         }
@@ -488,8 +488,13 @@ impl Hooks for Orca {
         Flow::Continue
     }
 
+    fn window_resize(&self, _host: &mut dyn ClientHost, event: &mut WindowResizeEvent) {
+        gfx::set_gui_scale(event.width, event.gui_width);
+    }
+
     fn gui_render_post(&self, host: &dyn ClientHost, event: &mut GuiRenderPostEvent<'_>) {
-        if event.gui_hidden || host.mod_screen() == Some(ID) {
+        // The overlays belong to the game, not the menus.
+        if event.gui_hidden || host.mod_screen() == Some(ID) || host.local_player().is_none() {
             return;
         }
         let size = event.batch.size();

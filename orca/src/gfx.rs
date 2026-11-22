@@ -125,9 +125,30 @@ pub struct Face(pub u8, pub bool);
 /// The window scales the stylesheet may use, largest first; each has its own font files.
 pub const TIERS: [f32; 4] = [0.6, 0.5, 0.42, 0.35];
 static TIER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// The game's GUI scale. Each font file is rasterised at that many texels per GUI pixel, so one texel is one
+/// screen pixel; 3 until the window reports its size.
+static GUI_SCALE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(3);
 
 pub fn set_tier(t: usize) {
     TIER.store(t, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn set_gui_scale(width: u32, gui_width: u32) {
+    if gui_width > 0 {
+        let s = (width as f32 / gui_width as f32).round() as usize;
+        GUI_SCALE.store(s.clamp(1, 6), std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Glyphs hang from a baseline 7 GUI px below the text's y whatever the size, so a line is centred on `cy`
+/// from its face's size, not from a box that scales with the window.
+pub fn text_y(cy: f32, face: Face) -> f32 {
+    cy - 7.0 + 0.30 * face.0 as f32 * scale() * 1.12
+}
+
+/// Where the middle of a line placed at `y` lands once the game snaps it to a whole GUI pixel.
+pub fn text_mid(y: f32, face: Face) -> f32 {
+    y.round() + 7.0 - 0.30 * face.0 as f32 * scale() * 1.12
 }
 
 pub fn scale() -> f32 {
@@ -136,7 +157,7 @@ pub fn scale() -> f32 {
 
 fn styled(s: &str, face: Face) -> Text {
     let mut style = TextStyle::default();
-    style.font = Some(format!("orca:{}{}t{}", if face.1 { 'b' } else { 'o' }, face.0, TIER.load(std::sync::atomic::Ordering::Relaxed)));
+    style.font = Some(format!("orca:{}{}t{}s{}", if face.1 { 'b' } else { 'o' }, face.0, TIER.load(std::sync::atomic::Ordering::Relaxed), GUI_SCALE.load(std::sync::atomic::Ordering::Relaxed)));
     Text::literal(s).with_style(style)
 }
 

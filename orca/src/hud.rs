@@ -25,8 +25,7 @@ const FADE_IN: f32 = 0.18;
 const FADE_OUT: f32 = 0.25;
 
 fn txt(d: &mut dyn DrawContext, t: &str, x: f32, cy: f32, c: u32, f: Face) {
-    let em = f.0 as f32 * K * 1.12;
-    gfx::text(d, t, [x, cy - em * 0.5], c, f);
+    gfx::text(d, t, [x, gfx::text_y(cy, f)], c, f);
 }
 
 pub fn draw(s: &mut State, d: &mut dyn DrawContext, host: &dyn ClientHost, size: [f32; 2]) {
@@ -75,18 +74,12 @@ pub fn draw(s: &mut State, d: &mut dyn DrawContext, host: &dyn ClientHost, size:
         }
         let pw = (content + 20.0).clamp(150.0, 210.0);
         let body_rows = rows.len().max(1) as f32;
-        let ph = 8.0 + 12.6 + 4.0 + body_rows * 18.0 + (body_rows - 1.0) + 1.0 + 4.0 + 18.0 + 8.0;
+        let ph = 8.0 + body_rows * 18.0 + (body_rows - 1.0) + 1.0 + 4.0 + 18.0 + 8.0;
         let (px, py) = (12.0 * K, 10.0 * K);
         gfx::round(d, [px, py, pw * K, ph * K], 8.0 * K, 0x8C0A_0A0E);
 
-        let mut cx = px + 10.0 * K;
-        for ch in "KEYBINDS".chars() {
-            let t = ch.to_string();
-            txt(d, &t, cx, py + (8.0 + 6.3) * K, FAINT, reg(10));
-            cx += w(&t, reg(10)) + 0.8 * K;
-        }
         let right = px + (pw - 10.0) * K;
-        let mut y = py + (8.0 + 12.6 + 4.0) * K;
+        let mut y = py + 8.0 * K;
         let kbd_row = |d: &mut dyn DrawContext, y: f32, label: &str| {
             let bw = (w(label, reg(11)) / K + 12.0) * K;
             gfx::round(d, [right - bw, y + 1.0 * K, bw, 16.0 * K], 4.0 * K, 0x12FF_FFFF);
