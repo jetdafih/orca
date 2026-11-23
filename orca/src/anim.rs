@@ -19,7 +19,7 @@ impl State {
             return;
         }
         self.last_tick = now;
-        self.dt = dt.min(0.05);
+        self.dt = dt.min(0.1);
         self.frame += 1;
         let frame = self.frame;
         self.anim.retain(|_, e| e.1.saturating_add(2) >= frame);

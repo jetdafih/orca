@@ -16,8 +16,24 @@ fn m(argb: u32) -> u32 {
     if a >= 0.999 { argb } else { alpha(argb, a) }
 }
 
+/// Rounds a GUI coordinate to the nearest whole screen pixel, so edges never straddle two pixels.
+fn snap(v: f32) -> f32 {
+    let s = gui_scale();
+    (v * s).round() / s
+}
+
 pub fn fill(draw: &mut dyn DrawContext, rect: [f32; 4], argb: u32) {
-    draw.fill(rect, m(argb));
+    let (x0, y0) = (snap(rect[0]), snap(rect[1]));
+    let (mut x1, mut y1) = (snap(rect[0] + rect[2]), snap(rect[1] + rect[3]));
+    let px = 1.0 / gui_scale();
+    // A sliver thinner than a pixel still shows as one.
+    if rect[2] > 0.0 && x1 <= x0 {
+        x1 = x0 + px;
+    }
+    if rect[3] > 0.0 && y1 <= y0 {
+        y1 = y0 + px;
+    }
+    draw.fill([x0, y0, x1 - x0, y1 - y0], m(argb));
 }
 
 pub fn gradient(draw: &mut dyn DrawContext, rect: [f32; 4], top: u32, bottom: u32) {
@@ -59,6 +75,23 @@ fn corners([x, y, w, h]: [f32; 4], r: f32) -> [([f32; 2], f32); 4] {
     [([x + r, y + r], 2.0), ([x + w - r, y + r], 3.0), ([x + w - r, y + h - r], 0.0), ([x + r, y + h - r], 1.0)]
 }
 
+/// Half the width of a curved edge's soft rim: 0.7 of a screen pixel either side of the true edge.
+fn feather() -> f32 {
+    0.7 / gui_scale()
+}
+
+/// A curved edge at radius `r`, coverage stepping from nearly full to nearly empty across
+/// `2 * f`. The GPU draws quads without edge smoothing, so each screen pixel takes the step its
+/// centre falls in, which reads as a smooth edge. `inward` flips it for the inside of a ring.
+fn ramp(draw: &mut dyn DrawContext, c: [f32; 2], r: f32, f: f32, turn: f32, argb: u32, inward: bool) {
+    const K: usize = 3;
+    for i in 0..K {
+        let (a, b) = (r - f + 2.0 * f * i as f32 / K as f32, r - f + 2.0 * f * (i + 1) as f32 / K as f32);
+        let cover = 1.0 - (i as f32 + 0.5) / K as f32;
+        band(draw, c, a.max(0.0), b.max(0.0), turn, alpha(argb, if inward { 1.0 - cover } else { cover }));
+    }
+}
+
 /// Fan from `c` out to radius `r` over one quarter turn.
 fn fan(draw: &mut dyn DrawContext, c: [f32; 2], r: f32, turn: f32, argb: u32) {
     let n = segments(r);
@@ -96,10 +129,10 @@ pub fn round(draw: &mut dyn DrawContext, rect: [f32; 4], radius: f32, argb: u32)
         fill(draw, [x, y + r, r, h - 2.0 * r], argb);
         fill(draw, [x + w - r, y + r, r, h - 2.0 * r], argb);
     }
-    let rim = alpha(argb, 0.5);
+    let f = feather();
     for (c, turn) in corners(rect, r) {
-        fan(draw, c, r - 0.25, turn, argb);
-        band(draw, c, r - 0.25, r + 0.25, turn, rim);
+        fan(draw, c, r - f, turn, argb);
+        ramp(draw, c, r, f, turn, argb, false);
     }
 }
 
@@ -122,8 +155,16 @@ pub fn ring(draw: &mut dyn DrawContext, rect: [f32; 4], radius: f32, th: f32, ar
     fill(draw, [x + r, y + h - th, w - 2.0 * r, th], argb);
     fill(draw, [x, y + r, th, h - 2.0 * r], argb);
     fill(draw, [x + w - th, y + r, th, h - 2.0 * r], argb);
+    let f = feather();
     for (c, turn) in corners(rect, r) {
-        band(draw, c, (r - th).max(0.0), r, turn, argb);
+        let inner = (r - th).max(0.0);
+        if th > 2.0 * f && inner > f {
+            band(draw, c, inner + f, r - f, turn, argb);
+            ramp(draw, c, r, f, turn, argb, false);
+            ramp(draw, c, inner, f, turn, argb, true);
+        } else {
+            band(draw, c, inner, r, turn, alpha(argb, (th / (2.0 * f)).min(1.0)));
+        }
     }
 }
 

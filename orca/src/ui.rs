@@ -523,7 +523,7 @@ pub fn draw_window(s: &mut State, draw: &mut dyn DrawContext, host: &dyn ClientH
         s.drag = None;
         s.cdrag = None;
     }
-    let win = s.anim(anim::WIN, 1.0, 0.0, 18.0);
+    let win = s.anim(anim::WIN, 1.0, 0.0, 45.0);
     gfx::set_alpha(win);
     s.hover_ok = s.pick.is_none();
     let tier = gfx::TIERS.iter().position(|k| WIN_W * k <= size[0] - 8.0 && WIN_H * k <= size[1] - 8.0).unwrap_or(gfx::TIERS.len() - 1);
