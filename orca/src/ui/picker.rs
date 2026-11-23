@@ -6,7 +6,8 @@ use crate::items::{ITEMS, TAGS};
 pub enum Pick {
     /// Tag 0 is All, 1 is Selected, and 2.. are `TAGS`.
     Items { mi: usize, si: usize, query: String, tag: usize, scroll: f32 },
-    Color { mi: usize, si: usize },
+    /// `hv` is hue in degrees, saturation and value, kept apart from the colour so greys keep their hue.
+    Color { mi: usize, si: usize, hv: [f32; 3] },
 }
 
 const PX: f32 = 50.0;
@@ -67,8 +68,34 @@ fn swatch(i: usize) -> u32 {
     }
 }
 
+pub fn to_hsv(c: u32) -> [f32; 3] {
+    let [r, g, b] = [16, 8, 0].map(|s| (c >> s & 0xFF) as f32 / 255.0);
+    let (hi, lo) = (r.max(g).max(b), r.min(g).min(b));
+    let d = hi - lo;
+    let h = if d == 0.0 {
+        0.0
+    } else if hi == r {
+        60.0 * ((g - b) / d).rem_euclid(6.0)
+    } else if hi == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    [h, if hi == 0.0 { 0.0 } else { d / hi }, hi]
+}
+
 impl State {
-    pub fn pick_press(&mut self, hit: Option<Hit>) {
+    /// Moves the picker's square or hue bar to the mouse while one is held.
+    pub fn color_drag(&mut self, at: [f32; 2]) {
+        let (Some(kind), Some(Pick::Color { mi, si, hv })) = (self.cdrag, self.pick.clone()) else { return };
+        let Some(r) = self.rects.iter().find(|(h, _)| if kind == 1 { matches!(h, Hit::PkSv) } else { matches!(h, Hit::PkHue) }).map(|(_, r)| *r) else { return };
+        let (tx, ty) = (((at[0] - r[0]) / r[2]).clamp(0.0, 1.0), ((at[1] - r[1]) / r[3]).clamp(0.0, 1.0));
+        let n = if kind == 1 { [hv[0], tx, 1.0 - ty] } else { [tx * 360.0, hv[1], hv[2]] };
+        self.vals[mi][si] = Val::Argb(hsv(n[0], n[1], n[2]));
+        self.pick = Some(Pick::Color { mi, si, hv: n });
+    }
+
+    pub fn pick_press(&mut self, hit: Option<Hit>, at: [f32; 2]) {
         let Some(pick) = self.pick.clone() else { return };
         match (pick, hit) {
             (_, None | Some(Hit::PkClose | Hit::PkScrim)) => self.pick = None,
@@ -108,9 +135,14 @@ impl State {
                 }
                 _ => {}
             },
-            (Pick::Color { mi, si }, Some(Hit::PkSwatch(i))) => {
-                self.vals[mi][si] = Val::Argb(swatch(i));
-                self.pick = None;
+            (Pick::Color { mi, si, .. }, Some(Hit::PkSwatch(i))) => {
+                let c = swatch(i);
+                self.vals[mi][si] = Val::Argb(c);
+                self.pick = Some(Pick::Color { mi, si, hv: to_hsv(c) });
+            }
+            (Pick::Color { .. }, Some(h @ (Hit::PkSv | Hit::PkHue))) => {
+                self.cdrag = Some(if matches!(h, Hit::PkSv) { 1 } else { 2 });
+                self.color_drag(at);
             }
             _ => {}
         }
@@ -131,7 +163,7 @@ pub(super) fn draw(p: &mut Pen<'_>, win: f32) {
                 *s = scroll;
             }
         }
-        Some(Pick::Color { mi, si }) => color(p, mi, si),
+        Some(Pick::Color { mi, si, hv }) => color(p, mi, si, hv),
         None => {}
     }
     p.o[1] -= ((1.0 - a) * 8.0 * k()).round();
@@ -237,7 +269,9 @@ fn items(p: &mut Pen<'_>, mi: usize, si: usize, query: &str, tag: usize, scroll:
                 } else if hv > 0.01 {
                     p.round(r, 9.0, gfx::alpha(0xFF1F_1F25, hv));
                 }
-                p.round([r[0] + 12.0, r[1] + 12.0, 12.0, 12.0], 3.0, swatch_col);
+                if !p.item(id, r[0] + 10.0, r[1] + 10.0, 16.0) {
+                    p.round([r[0] + 12.0, r[1] + 12.0, 12.0, 12.0], 3.0, swatch_col);
+                }
                 let face = if on { BOLD(12) } else { REG(12) };
                 let name = fit(p, &id.replace('_', " "), cw - 34.0 - 12.0, face);
                 p.text(&name, r[0] + 34.0, r[1] + 18.0, if on { TEXT } else { gfx::mix(MUTED, LABEL, hv) }, face);
@@ -263,28 +297,54 @@ fn items(p: &mut Pen<'_>, mi: usize, si: usize, query: &str, tag: usize, scroll:
     scroll
 }
 
-fn color(p: &mut Pen<'_>, mi: usize, si: usize) {
+fn color(p: &mut Pen<'_>, mi: usize, si: usize, hv: [f32; 3]) {
     let Val::Argb(cur) = p.s.vals[mi][si] else { return };
-    let (w, h) = (16.0 * 2.0 + SWATCH_COLS as f32 * 24.0 - 4.0, 238.0);
+    const N: usize = 71;
+    const CW: f32 = 4.0;
+    let (iw, sv_h, hue_h) = (N as f32 * CW, 120.0, 14.0);
+    let (w, h) = (16.0 * 2.0 + iw, 292.0);
     let (x, y) = ((WIN_W - w) / 2.0, (WIN_H - h) / 2.0);
     scrim(p);
     p.round([x - 1.0, y - 1.0, w + 2.0, h + 2.0], 15.0, POP_RING);
     p.round([x, y, w, h], 14.0, POP);
     p.hit(Hit::PkNone, [x, y, w, h]);
-    let title = format!("{} · {}", p.s.mods[mi].name, p.s.mods[mi].settings[si].label);
+    let title = format!("{} \u{b7} {}", p.s.mods[mi].name, p.s.mods[mi].settings[si].label);
     p.text(&title, x + 16.0, y + 26.0, TEXT, BOLD(14));
-    let gy = y + 46.0;
-    for i in 0..SWATCH_COLS * SWATCH_ROWS {
-        let (r, c) = (i / SWATCH_COLS, i % SWATCH_COLS);
-        let sr = [x + 16.0 + c as f32 * 24.0, gy + r as f32 * 24.0, 20.0, 20.0];
-        let col = swatch(i);
-        p.round(sr, 5.0, col);
-        if col == cur | 0xFF00_0000 {
-            p.ring([sr[0] - 2.0, sr[1] - 2.0, 24.0, 24.0], 6.0, TEXT);
+    // Saturation runs left to right and value top to bottom, one gradient column per step.
+    let sv = [x + 16.0, y + 46.0, iw, sv_h];
+    let hue = [x + 16.0, sv[1] + sv_h + 10.0, iw, hue_h];
+    if !p.dry {
+        for i in 0..N {
+            let t = i as f32 / (N - 1) as f32;
+            let mut r = p.at([sv[0] + i as f32 * CW, sv[1], CW, sv_h]);
+            r[2] += 0.6;
+            gfx::gradient(p.d, r, hsv(hv[0], t, 1.0), 0xFF00_0000);
+            let mut r = p.at([hue[0] + i as f32 * CW, hue[1], CW, hue_h]);
+            r[2] += 0.6;
+            gfx::fill(p.d, r, hsv(t * 360.0, 1.0, 1.0));
         }
-        p.hit(Hit::PkSwatch(i), sr);
     }
-    let cy = gy + SWATCH_ROWS as f32 * 24.0 + 8.0;
+    p.hit(Hit::PkSv, sv);
+    p.hit(Hit::PkHue, hue);
+    let (cx, cy) = (sv[0] + hv[1] * iw, sv[1] + (1.0 - hv[2]) * sv_h);
+    p.round([cx - 4.0, cy - 4.0, 8.0, 8.0], 4.0, cur | 0xFF00_0000);
+    p.ring([cx - 5.0, cy - 5.0, 10.0, 10.0], 5.0, TEXT);
+    p.round([hue[0] + hv[0] / 360.0 * iw - 2.0, hue[1] - 2.0, 4.0, hue_h + 4.0], 2.0, TEXT);
+    // Presets: the vivid row and the greys of the old palette.
+    let py = hue[1] + hue_h + 14.0;
+    for (ri, row) in [2usize, 5].into_iter().enumerate() {
+        for c in 0..SWATCH_COLS {
+            let i = row * SWATCH_COLS + c;
+            let sr = [x + 16.0 + c as f32 * 24.0, py + ri as f32 * 24.0, 20.0, 20.0];
+            let col = swatch(i);
+            p.round(sr, 5.0, col);
+            if col == cur | 0xFF00_0000 {
+                p.ring([sr[0] - 2.0, sr[1] - 2.0, 24.0, 24.0], 6.0, TEXT);
+            }
+            p.hit(Hit::PkSwatch(i), sr);
+        }
+    }
+    let cy = py + 2.0 * 24.0 + 8.0;
     p.round([x + 16.0, cy, 20.0, 20.0], 5.0, cur | 0xFF00_0000);
     p.text(&format!("#{:06X}", cur & 0xFF_FFFF), x + 44.0, cy + 10.0, SOFT, REG(12));
 }

@@ -20,6 +20,15 @@ pub fn fill(draw: &mut dyn DrawContext, rect: [f32; 4], argb: u32) {
     draw.fill(rect, m(argb));
 }
 
+pub fn gradient(draw: &mut dyn DrawContext, rect: [f32; 4], top: u32, bottom: u32) {
+    draw.fill_gradient(rect, m(top), m(bottom));
+}
+
+/// Whether nothing is fading; item icons ignore the alpha above, so they only draw when it is 1.
+pub fn opaque() -> bool {
+    f32::from_bits(ALPHA.load(std::sync::atomic::Ordering::Relaxed)) >= 0.999
+}
+
 pub fn quad(draw: &mut dyn DrawContext, pts: [[f32; 2]; 4], argb: u32) {
     draw.quad(pts, m(argb));
 }
@@ -149,6 +158,10 @@ pub fn text_y(cy: f32, face: Face) -> f32 {
 /// Where the middle of a line placed at `y` lands once the game snaps it to a whole GUI pixel.
 pub fn text_mid(y: f32, face: Face) -> f32 {
     y.round() + 7.0 - 0.30 * face.0 as f32 * scale() * 1.12
+}
+
+pub fn gui_scale() -> f32 {
+    GUI_SCALE.load(std::sync::atomic::Ordering::Relaxed) as f32
 }
 
 pub fn scale() -> f32 {

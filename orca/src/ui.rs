@@ -66,6 +66,26 @@ impl Pen<'_> {
         gfx::text(self.d, t, [self.o[0] + x * k(), gfx::text_y(self.o[1] + cy * k(), f)], color, f);
     }
 
+    /// The item's own icon, `size` CSS pixels square; false when it can't be drawn (unknown item, mid-fade).
+    fn item(&mut self, id: &str, x: f32, y: f32, size: f32) -> bool {
+        if self.dry || !gfx::opaque() {
+            return false;
+        }
+        let key = match self.s.icons.get(id) {
+            Some(k) => *k,
+            None => {
+                let k = mod_api::Identifier::parse(&format!("minecraft:{id}")).ok().and_then(|i| self.host.item_key(&i));
+                self.s.icons.insert(id.to_owned(), k);
+                k
+            }
+        };
+        // 16 texels, drawn at a whole number of screen pixels each and on a pixel boundary, so none come out wider.
+        let (r, s) = (self.at([x, y, size, size]), gfx::gui_scale());
+        let g = 16.0 * (r[2] * s / 16.0).round().max(1.0) / s;
+        let at = [r[0] + (r[2] - g) / 2.0, r[1] + (r[2] - g) / 2.0].map(|v| (v * s).round() / s);
+        key.is_some_and(|k| self.d.item(k, at, g))
+    }
+
     /// Where the middle of a line drawn at `cy` really lands, in CSS pixels, after the game snaps it to a GUI pixel.
     fn mid(&self, cy: f32, f: Face) -> f32 {
         (gfx::text_mid(gfx::text_y(self.o[1] + cy * k(), f), f) - self.o[1]) / k()
@@ -405,7 +425,7 @@ fn body(p: &mut Pen<'_>, c: Card, x: f32, y: f32, w: f32) -> f32 {
                         let mut rows = 1;
                         let mut cx = 0.0;
                         let mut places = Vec::new();
-                        let mut widths: Vec<f32> = items.iter().map(|n| p.width(&n.replace('_', " "), REG(12)) + 9.0 + 6.0 + 18.0 + 4.0).collect();
+                        let mut widths: Vec<f32> = items.iter().map(|n| p.width(&n.replace('_', " "), REG(12)) + 28.0 + 2.0 + 18.0 + 4.0).collect();
                         widths.push(p.width("+ Add", REG(12)) + 20.0);
                         for cw in &widths {
                             if cx > 0.0 && cx + cw > w {
@@ -424,7 +444,12 @@ fn body(p: &mut Pen<'_>, c: Card, x: f32, y: f32, w: f32) -> f32 {
                             let r = [x + cx, top + *row as f32 * 30.0, *cw, 24.0];
                             if let Some(n) = items.get(i) {
                                 p.round(r, 6.0, FIELD);
-                                p.text(&n.replace('_', " "), r[0] + 9.0, r[1] + 12.0, SOFT, REG(12));
+                                if !p.item(n, r[0] + 6.0, r[1] + 4.0, 16.0) {
+                                    if let Some(c) = crate::items::ITEMS.iter().find(|i| i.0 == *n).map(|i| i.2) {
+                                        p.round([r[0] + 8.0, r[1] + 6.0, 12.0, 12.0], 3.0, c);
+                                    }
+                                }
+                                p.text(&n.replace('_', " "), r[0] + 28.0, r[1] + 12.0, SOFT, REG(12));
                                 let cr = [r[0] + cw - 22.0, r[1] + 3.0, 18.0, 18.0];
                                 let hv = p.hov(cr);
                                 p.round(cr, 5.0, gfx::alpha(0xFF2C_2C33, hv));
@@ -496,6 +521,7 @@ pub fn draw_window(s: &mut State, draw: &mut dyn DrawContext, host: &dyn ClientH
         s.open = None;
         s.capturing = false;
         s.drag = None;
+        s.cdrag = None;
     }
     let win = s.anim(anim::WIN, 1.0, 0.0, 18.0);
     gfx::set_alpha(win);
@@ -549,7 +575,11 @@ pub fn draw_window(s: &mut State, draw: &mut dyn DrawContext, host: &dyn ClientH
             p.round(r, 8.0, gfx::alpha(SEL, bg));
         }
         let onv = p.ease(r, 4, on);
-        p.text(&name, 22.0, ly + 14.0, gfx::mix(MUTED, TEXT, onv.max(hv * 0.5)), REG(12));
+        // The name leaves room for the key hint: smaller first, then cut short.
+        let kw = key.as_ref().map_or(0.0, |k| p.width(k, REG(10)) + 8.0);
+        let face = if p.width(&name, REG(12)) > 84.0 - kw { REG(11) } else { REG(12) };
+        let shown = fit(&p, &name, 84.0 - kw, face);
+        p.text(&shown, 22.0, ly + 14.0, gfx::mix(MUTED, TEXT, onv.max(hv * 0.5)), face);
         if let Some(k) = key {
             p.text_right(&k, 106.0, ly + 14.0, FAINT, REG(10));
         }
@@ -558,11 +588,25 @@ pub fn draw_window(s: &mut State, draw: &mut dyn DrawContext, host: &dyn ClientH
     }
     // The user block at the foot of the side.
     let me = 528.0 - 24.0;
+    let who = p.host.local_player();
+    let name = who
+        .as_ref()
+        .and_then(|w| p.host.client_session().client_tab_list().and_then(|l| l.entries.iter().find(|e| e.uuid == w.uuid()).map(|e| e.name.clone())))
+        .unwrap_or_else(|| "User".to_owned());
     if !p.dry {
         let (cx, cy) = (p.o[0] + 28.0 * k(), p.o[1] + (me + 12.0) * k());
-        gfx::circle(p.d, cx, cy, 12.0 * k(), ACCENT);
+        let half = 12.0 * k();
+        let head = who.as_ref().map(|w| {
+            // The head fills the box (a bit over, so the chin cuts off the neck); the model's centre sits 0.74 block below the head's.
+            let view = mod_api::GuiEntityView::new([cx - half, cy - half, cx + half, cy + half], 4.4 * half, 0.74, mod_api::GuiEntityLook::Turned { yaw: 0.0, pitch: 0.0 });
+            p.d.entity(&mod_api::GuiEntity::Existing(w.clone().into()), view).is_ok()
+        });
+        if head != Some(true) {
+            gfx::circle(p.d, cx, cy, half, ACCENT);
+        }
     }
-    p.text("User", 44.0, me + 5.0, SOFT, REG(12));
+    let shown = fit(&p, &name, 72.0, REG(12));
+    p.text(&shown, 44.0, me + 5.0, SOFT, REG(12));
     let up = uptime(p.s);
     p.text(&up, 44.0, me + 19.0, FAINT, REG(10));
 

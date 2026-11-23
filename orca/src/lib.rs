@@ -100,6 +100,8 @@ enum Hit {
     PkClear,
     PkAll,
     PkSwatch(usize),
+    PkSv,
+    PkHue,
 }
 
 struct State {
@@ -115,6 +117,10 @@ struct State {
     capturing: bool,
     /// The slider being dragged: module, setting, and which end of a range.
     drag: Option<(usize, usize, bool)>,
+    /// The colour picker's square (1) or hue bar (2) under the mouse.
+    cdrag: Option<u8>,
+    /// Item icons by id; `None` once an id is known to have none.
+    icons: std::collections::HashMap<String, Option<mod_api::ItemKey>>,
     rects: Vec<(Hit, [f32; 4])>,
     /// The dropdown that is open: module and setting.
     open: Option<(usize, usize)>,
@@ -156,6 +162,8 @@ impl State {
             keybinds: true,
             capturing: false,
             drag: None,
+            cdrag: None,
+            icons: Default::default(),
             rects: Vec::new(),
             open: None,
             active: 0,
@@ -213,7 +221,7 @@ impl State {
     fn press(&mut self, at: [f32; 2]) {
         let hit = self.hit(at);
         if self.pick.is_some() {
-            self.pick_press(hit);
+            self.pick_press(hit, at);
             return;
         }
         let keep = match (hit, self.open) {
@@ -280,7 +288,7 @@ impl State {
                 Val::Set(v) => v[oi] = !v[oi],
                 _ => {}
             },
-            Hit::PkScrim | Hit::PkNone | Hit::PkClose | Hit::PkTag(_) | Hit::PkItem(_) | Hit::PkClear | Hit::PkAll | Hit::PkSwatch(_) => {}
+            Hit::PkScrim | Hit::PkNone | Hit::PkClose | Hit::PkTag(_) | Hit::PkItem(_) | Hit::PkClear | Hit::PkAll | Hit::PkSwatch(_) | Hit::PkSv | Hit::PkHue => {}
             Hit::Setting(mi, si) => {
                 let Some(track) = self.track(mi, si) else { return };
                 let (kind, val) = (self.mods[mi].settings[si].kind, self.vals[mi][si].clone());
@@ -297,7 +305,7 @@ impl State {
                         self.drag = Some((mi, si, high));
                         self.drag_to(mi, si, high, at[0]);
                     }
-                    (Kind::Color, _) => self.pick = Some(Pick::Color { mi, si }),
+                    (Kind::Color, Val::Argb(c)) => self.pick = Some(Pick::Color { mi, si, hv: ui::picker::to_hsv(c) }),
                     _ => {}
                 }
             }
@@ -321,7 +329,40 @@ fn value_text(kind: Kind, unit: &str, v: &Val) -> String {
 }
 
 fn key_label(full: &str) -> String {
-    full.strip_prefix("key.keyboard.").unwrap_or(full).replace(['.', '_'], " ").to_uppercase()
+    if let Some(m) = full.strip_prefix("key.mouse.") {
+        return match m {
+            "left" => "LMB".to_owned(),
+            "right" => "RMB".to_owned(),
+            "middle" => "MMB".to_owned(),
+            n => format!("MOUSE {n}"),
+        };
+    }
+    let k = full.strip_prefix("key.keyboard.").unwrap_or(full);
+    // Short forms for the long names, so a hint in the sidebar leaves the module its room.
+    let short = match k {
+        "left.control" => "LCTRL",
+        "right.control" => "RCTRL",
+        "left.shift" => "LSHIFT",
+        "right.shift" => "RSHIFT",
+        "left.alt" => "LALT",
+        "right.alt" => "RALT",
+        "left.win" => "LWIN",
+        "right.win" => "RWIN",
+        "caps.lock" => "CAPS",
+        "page.up" => "PGUP",
+        "page.down" => "PGDN",
+        "print.screen" => "PRTSC",
+        "scroll.lock" => "SCRLK",
+        "num.lock" => "NUMLK",
+        _ => "",
+    };
+    if !short.is_empty() {
+        return short.to_owned();
+    }
+    match k.strip_prefix("keypad.") {
+        Some(n) => format!("NUM {}", n.replace(['.', '_'], " ").to_uppercase()),
+        None => k.replace(['.', '_'], " ").to_uppercase(),
+    }
 }
 
 #[derive(Default)]
@@ -393,6 +434,21 @@ impl Hooks for Orca {
         if event.button == 0 {
             let at = event.screen.mouse;
             self.with(|s| s.press(at));
+        } else {
+            // While a bind waits for input, any button but the left one (it is the window's own) is the bind.
+            let name = match event.button {
+                1 => "key.mouse.right".to_owned(),
+                2 => "key.mouse.middle".to_owned(),
+                n => format!("key.mouse.{}", n + 1),
+            };
+            self.with(|s| {
+                if s.capturing {
+                    s.capturing = false;
+                    if let Some(m) = s.selected() {
+                        s.key[m] = Some(name);
+                    }
+                }
+            });
         }
         Flow::Cancel
     }
@@ -401,7 +457,10 @@ impl Hooks for Orca {
         if host.mod_screen() != Some(ID) {
             return Flow::Continue;
         }
-        self.with(|s| s.drag = None);
+        self.with(|s| {
+            s.drag = None;
+            s.cdrag = None;
+        });
         Flow::Cancel
     }
 
@@ -409,11 +468,12 @@ impl Hooks for Orca {
         if host.mod_screen() != Some(ID) {
             return Flow::Continue;
         }
-        let x = event.screen.mouse[0];
+        let mouse = event.screen.mouse;
         self.with(|s| {
             if let Some((m, i, high)) = s.drag {
-                s.drag_to(m, i, high, x);
+                s.drag_to(m, i, high, mouse[0]);
             }
+            s.color_drag(mouse);
         });
         Flow::Cancel
     }
